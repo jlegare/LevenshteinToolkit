@@ -10,6 +10,6 @@ export nfa
 
 include("matrix.jl")
 include("row.jl")
-include("nfa.jl")
+include("automata.jl")
 
 end
