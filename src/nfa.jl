@@ -1,3 +1,5 @@
+using DataStructures
+
 # ----------------------------------------
 # TYPES
 # ----------------------------------------
@@ -13,16 +15,10 @@ struct State
     errors ::Int64
 end
 
-struct Transition
-    from ::State
-    on   ::Union{Epsilon, Anything, Char}
-    to   ::State
-end
-
 struct NFA
-    start       ::State
-    transitions ::Set{Transition}
-    finals      ::Set{State}
+    start  ::State
+    states ::OrderedDict{State, OrderedDict{Union{Epsilon, Anything, Char}, State}}
+    finals ::Set{State}
 end
 
 # ----------------------------------------
@@ -35,10 +31,14 @@ function nfa(word, maximum_error)
     end
 
     function add(nfa, from, on, to)
-        push!(nfa.transitions, Transition(from, on, to))
+        if !(from ∈ keys(nfa.states))
+            nfa.states[from] = OrderedDict{Union{Epsilon, Anything, Char}, State}()
+        end
+
+        nfa.states[from][on] = to
     end
 
-    nfa = NFA(State(0, 0), Set{Transition}(), Set{State}())
+    nfa = NFA(State(0, 0), OrderedDict{State, OrderedDict{Union{Epsilon, Anything, Char}, State}}(), Set{State}())
 
     for ( i, character ) ∈ zip(Iterators.countfrom(0), word)
         for error ∈ 0:maximum_error
