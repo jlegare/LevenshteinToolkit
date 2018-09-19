@@ -58,7 +58,7 @@ function draw(io::IO, nfa::NFA)
 
     for ( i, state ) ∈ enumerate(keys(nfa.states))
         for ( j, on ) ∈ enumerate(keys(nfa.states[state]))
-            if !(nfa.states[state][on] ∈ keys(index))
+            if nfa.states[state][on] ∉ keys(index)
                 target = nfa.states[state][on]
                 k = length(index) + 1
                 index[target] = k
@@ -79,7 +79,7 @@ function draw(io::IO, nfa::NFA)
     # fashion, but for now I think this is easier to read.
     #
     for state ∈ keys(index)
-        if !(state.errors ∈ keys(errors))
+        if state.errors ∉ keys(errors)
             errors[state.errors] = [ ]
         end
         push!(errors[state.errors], state)
@@ -109,7 +109,7 @@ function nfa(word, maximum_error)
     end
 
     function add(nfa, from, on, to)
-        if !(from ∈ keys(nfa.states))
+        if from ∉ keys(nfa.states)
             nfa.states[from] = OrderedDict{Union{Epsilon, Anything, Char}, State}()
         end
 
