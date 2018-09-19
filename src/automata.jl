@@ -17,13 +17,70 @@ end
 
 struct NFA
     start  ::State
-    states ::OrderedDict{State, OrderedDict{Union{Epsilon, Anything, Char}, State}}
+    states ::OrderedDict{State, OrderedDict{Tuple{Union{Epsilon, Anything, Char}, State}, State}}
     finals ::Set{State}
 end
 
 # ----------------------------------------
 # FUNCTIONS
 # ----------------------------------------
+
+function draw(io::IO, nfa::NFA)
+    function draw(state::State, id::Int64)
+        return "   state$(id) [ label=\"($(state.seen), $(state.errors))\" ];\n"
+    end
+
+    states      = IOBuffer(append = true)
+    connections = IOBuffer(append = true)
+    ranks       = IOBuffer(append = true)
+
+    index  = Dict{State, Int64}()
+    errors = Dict{Int64, Array{State}}()
+
+    for ( i, state ) ∈ enumerate(keys(nfa.states))
+        write(states, draw(state, i))
+        index[state] = i
+    end
+
+    for ( i, state ) ∈ enumerate(keys(nfa.states))
+        for ( j, on ) ∈ enumerate(keys(nfa.states[state]))
+            if !(nfa.states[state][on] ∈ keys(index))
+                target = nfa.states[state][on]
+                k = length(index) + 1
+                index[target] = k
+
+                write(states, draw(target, k))
+            end
+
+            k = index[nfa.states[state][on]]
+            write(connections, "   state$i -> state$k;\n")
+        end
+    end
+
+    for state ∈ keys(index)
+        if !(state.errors ∈ keys(errors))
+            errors[state.errors] = [ ]
+        end
+        push!(errors[state.errors], state)
+    end
+
+    for error ∈ keys(errors)
+        write(ranks, "   { rank = same;")
+        for state ∈ errors[error]
+            write(ranks, " state$(index[state]);")
+        end
+        write(ranks, "}\n")
+    end
+
+    write(io, "digraph g {\n")
+    write(io, read(connections, String))
+    write(io, read(states, String))
+    write(io, read(ranks, String))
+    write(io, "}")
+
+    return nothing
+end
+
 
 function nfa(word, maximum_error)
     function accept(nfa, state)
@@ -35,10 +92,11 @@ function nfa(word, maximum_error)
             nfa.states[from] = OrderedDict{Union{Epsilon, Anything, Char}, State}()
         end
 
-        nfa.states[from][on] = to
+        nfa.states[from][( on, to )] = to
     end
 
-    nfa = NFA(State(0, 0), OrderedDict{State, OrderedDict{Union{Epsilon, Anything, Char}, State}}(), Set{State}())
+    nfa = NFA(State(0, 0), OrderedDict{State, OrderedDict{State, OrderedDict{Union{Epsilon, Anything, Char}, State}}}(),
+              Set{State}())
 
     for ( i, character ) ∈ zip(Iterators.countfrom(0), word)
         for error ∈ 0:maximum_error

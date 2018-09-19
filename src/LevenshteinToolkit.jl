@@ -6,6 +6,7 @@ module LevenshteinToolkit
 
 export distance_matrix
 export distance_row
+export draw
 export nfa
 
 include("matrix.jl")
