@@ -110,13 +110,13 @@ function nfa(word, maximum_error)
 
     function add(nfa, from, on, to)
         if from ∉ keys(nfa.states)
-            nfa.states[from] = OrderedDict{Union{Epsilon, Anything, Char}, State}()
+            nfa.states[from] = OrderedDict{Tuple{Union{Epsilon, Anything, Char}, State}, State}()
         end
 
         nfa.states[from][( on, to )] = to
     end
 
-    nfa = NFA(State(0, 0), OrderedDict{State, OrderedDict{State, OrderedDict{Union{Epsilon, Anything, Char}, State}}}(),
+    nfa = NFA(State(0, 0), OrderedDict{State, OrderedDict{Tuple{Union{Epsilon, Anything, Char}, State}, State}}(),
               Set{State}())
 
     for ( i, character ) ∈ zip(Iterators.countfrom(0), word)
