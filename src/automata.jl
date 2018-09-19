@@ -27,7 +27,21 @@ end
 
 function draw(io::IO, nfa::NFA)
     function draw(state::State, id::Int64)
-        return "   state$(id) [ label=\"($(state.seen), $(state.errors))\" ];\n"
+        return ("   state$(id) [ label=\"($(state.seen), $(state.errors))\""
+                * (state ∈ nfa.finals ? " penwidth = 3" : "")
+                * " ];\n")
+    end
+
+    function draw(on::Char)
+        return " label=<<I>$(on)</I>>"
+    end
+
+    function draw(on::Anything)
+        return " label=<*>"
+    end
+
+    function draw(on::Epsilon)
+        return " label=<&#949;>"
     end
 
     states      = IOBuffer(append = true)
@@ -52,11 +66,18 @@ function draw(io::IO, nfa::NFA)
                 write(states, draw(target, k))
             end
 
-            k = index[nfa.states[state][on]]
-            write(connections, "   state$i -> state$k;\n")
+            target = nfa.states[state][on]
+            k = index[target]
+
+            write(connections, "   state$i -> state$k [")
+            write(connections, draw(on[1]))
+            write(connections, " ];\n")
         end
     end
 
+    # Grouping up nodes on error values can make for a cleaner graph. It should be possible to do this in a more concise
+    # fashion, but for now I think this is easier to read.
+    #
     for state ∈ keys(index)
         if !(state.errors ∈ keys(errors))
             errors[state.errors] = [ ]
