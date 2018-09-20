@@ -16,9 +16,15 @@ struct State
 end
 
 struct NFA
+    word   ::String
     start  ::State
     states ::OrderedDict{State, OrderedDict{Tuple{Union{Epsilon, Anything, Char}, State}, State}}
     finals ::Set{State}
+end
+
+struct DFA
+    nfa      ::NFA
+    alphabet ::Array{Char, 1}
 end
 
 # ----------------------------------------
@@ -103,6 +109,34 @@ function draw(io::IO, nfa::NFA)
 end
 
 
+function dfa(nfa::NFA)
+    function ε_closure(state::State)
+        states = Set{State}([ state ])
+
+        i = length(states)
+        while true
+            for state ∈ states
+                frontier = map(x -> x[2], filter(x -> x[1] == Epsilon(), collect(keys(nfa.states[state]))))
+                union!(states, frontier)
+            end
+
+            if length(states) == i
+                break
+            end
+            i = length(states)
+        end
+
+        return states
+    end
+
+    dfa = DFA(nfa, sort(unique(nfa.word)))
+
+    @show ε_closure(nfa.start)
+    
+    return dfa
+end
+
+
 function nfa(word, maximum_error)
     function accept(nfa, state)
         push!(nfa.finals, state)
@@ -116,7 +150,7 @@ function nfa(word, maximum_error)
         nfa.states[from][( on, to )] = to
     end
 
-    nfa = NFA(State(0, 0), OrderedDict{State, OrderedDict{Tuple{Union{Epsilon, Anything, Char}, State}, State}}(),
+    nfa = NFA(word, State(0, 0), OrderedDict{State, OrderedDict{Tuple{Union{Epsilon, Anything, Char}, State}, State}}(),
               Set{State}())
 
     for ( i, character ) ∈ zip(Iterators.countfrom(0), word)

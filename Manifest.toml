@@ -40,10 +40,10 @@ deps = ["Base64"]
 uuid = "d6f4376e-aef5-505a-96c1-9c027394607a"
 
 [[OrderedCollections]]
-deps = ["InteractiveUtils", "Pkg", "Random", "Serialization", "Test"]
-git-tree-sha1 = "27af6dc22697bf20ace8e3a45f404a34eaf0b819"
+deps = ["Pkg", "Random", "Serialization", "Test"]
+git-tree-sha1 = "41da1edba028376b58520ca01d9a41e29f855d55"
 uuid = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
-version = "1.0.0"
+version = "1.0.1"
 
 [[Pkg]]
 deps = ["Dates", "LibGit2", "Markdown", "Printf", "REPL", "Random", "SHA", "UUIDs"]
