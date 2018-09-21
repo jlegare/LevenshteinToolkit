@@ -18,13 +18,13 @@ end
 struct NFA
     word   ::String
     start  ::State
-    states ::OrderedDict{State, OrderedDict{Tuple{Union{Epsilon, Anything, Char}, State}, State}}
+    states ::OrderedDict{State, OrderedDict{Union{Epsilon, Anything, Char}, OrderedSet{State}}}
     finals ::Set{State}
 end
 
 struct DFA
     nfa      ::NFA
-    alphabet ::Array{Char, 1}
+    alphabet ::Array{Union{Char, Anything}, 1}
 end
 
 # ----------------------------------------
@@ -63,21 +63,21 @@ function draw(io::IO, nfa::NFA)
     end
 
     for ( i, state ) ∈ enumerate(keys(nfa.states))
-        for ( j, on ) ∈ enumerate(keys(nfa.states[state]))
-            if nfa.states[state][on] ∉ keys(index)
-                target = nfa.states[state][on]
-                k = length(index) + 1
-                index[target] = k
+        for on ∈ keys(nfa.states[state])
+            for target ∈ nfa.states[state][on]
+                if target ∉ keys(index)
+                    k = length(index) + 1
+                    index[target] = k
 
-                write(states, draw(target, k))
+                    write(states, draw(target, k))
+                end
+
+                k = index[target]
+
+                write(connections, "   state$i -> state$k [")
+                write(connections, draw(on))
+                write(connections, " ];\n")
             end
-
-            target = nfa.states[state][on]
-            k = index[target]
-
-            write(connections, "   state$i -> state$k [")
-            write(connections, draw(on[1]))
-            write(connections, " ];\n")
         end
     end
 
@@ -110,14 +110,15 @@ end
 
 
 function dfa(nfa::NFA)
-    function ε_closure(state::State)
-        states = Set{State}([ state ])
+    function ε_closure(initial_states::Set{State})
+        states = copy(initial_states)
 
         i = length(states)
         while true
             for state ∈ states
-                frontier = map(x -> x[2], filter(x -> x[1] == Epsilon(), collect(keys(nfa.states[state]))))
-                union!(states, frontier)
+                if Epsilon() ∈ keys(nfa.states[state])
+                    union!(states, nfa.states[state][Epsilon()])
+                end
             end
 
             if length(states) == i
@@ -129,10 +130,10 @@ function dfa(nfa::NFA)
         return states
     end
 
-    dfa = DFA(nfa, sort(unique(nfa.word)))
+    dfa = DFA(nfa, union(sort(unique(nfa.word)), [ Anything() ]))
 
-    @show ε_closure(nfa.start)
-    
+    start = ε_closure(Set([ nfa.start ]))
+
     return dfa
 end
 
@@ -144,14 +145,17 @@ function nfa(word, maximum_error)
 
     function add(nfa, from, on, to)
         if from ∉ keys(nfa.states)
-            nfa.states[from] = OrderedDict{Tuple{Union{Epsilon, Anything, Char}, State}, State}()
+            nfa.states[from] = OrderedDict{Union{Epsilon, Anything, Char}, OrderedSet{State}}()
         end
 
-        nfa.states[from][( on, to )] = to
+        if on ∉ keys(nfa.states[from])
+            nfa.states[from][on] = OrderedSet{State}()
+        end
+
+        push!(nfa.states[from][on], to)
     end
 
-    nfa = NFA(word, State(0, 0), OrderedDict{State, OrderedDict{Tuple{Union{Epsilon, Anything, Char}, State}, State}}(),
-              Set{State}())
+    nfa = NFA(word, State(0, 0), OrderedDict{State, OrderedDict{Union{Epsilon, Anything, Char}, OrderedSet{State}}}(), Set{State}())
 
     for ( i, character ) ∈ zip(Iterators.countfrom(0), word)
         for error ∈ 0:maximum_error
