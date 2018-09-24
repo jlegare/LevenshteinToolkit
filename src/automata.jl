@@ -34,6 +34,7 @@ struct DFA
     nfa    ::NFA
     start  ::DFAState
     states ::Dict{DFAState, Tuple{Bool, Dict{Union{Char, AnythingBut}, DFAState}}}
+    finals ::Set{DFAState}
 end
 
 # ----------------------------------------
@@ -201,7 +202,7 @@ function dfa(nfa::NFA)
     letters = unique(nfa.word)
 
     dfa = DFA(nfa, DFAState(ε_closure(Set([ nfa.start ]))),
-              Dict{DFAState, Tuple{Bool, Dict{Union{Char, AnythingBut}, DFAState}}}())
+              Dict{DFAState, Tuple{Bool, Dict{Union{Char, AnythingBut}, DFAState}}}(), Set{DFAState}())
 
     dfa.states[dfa.start] = ( false, Dict{Union{Char, AnythingBut}, DFAState}() )
 
@@ -239,6 +240,12 @@ function dfa(nfa::NFA)
             if findfirst(k -> k.states == target[2].states, collect(keys(dfa.states))) == nothing
                 dfa.states[target[2]] = ( false, Dict{Union{Char, AnythingBut}, DFAState}() )
             end
+        end
+    end
+
+    for dfa_state ∈ keys(dfa.states)
+        if !isempty(intersect(dfa_state.states, nfa.finals))
+            push!(dfa.finals, dfa_state)
         end
     end
 
