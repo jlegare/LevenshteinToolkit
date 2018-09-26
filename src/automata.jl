@@ -1,5 +1,7 @@
 using DataStructures
 
+import Base.isless
+
 # ----------------------------------------
 # TYPES
 # ----------------------------------------
@@ -33,91 +35,13 @@ end
 struct DFA
     nfa    ::NFA
     start  ::DFAState
-    states ::Dict{DFAState, Tuple{Bool, Dict{Union{Char, AnythingBut}, DFAState}}}
+    states ::Dict{DFAState, Dict{Union{Char, AnythingBut}, DFAState}}
     finals ::Set{DFAState}
 end
 
 # ----------------------------------------
 # FUNCTIONS
 # ----------------------------------------
-
-function draw(io::IO, nfa::NFA)
-    function draw(state::NFAState, id::Int64)
-        return ("   state$(id) [ label=\"($(state.seen), $(state.errors))\""
-                * (state ∈ nfa.finals ? " penwidth = 3" : "")
-                * " ];\n")
-    end
-
-    function draw(on::Char)
-        return " label=<<I>$(on)</I>>"
-    end
-
-    function draw(on::Anything)
-        return " label=<*>"
-    end
-
-    function draw(on::Epsilon)
-        return " label=<&#949;>"
-    end
-
-    states      = IOBuffer(append = true)
-    connections = IOBuffer(append = true)
-    ranks       = IOBuffer(append = true)
-
-    index  = Dict{NFAState, Int64}()
-    errors = Dict{Int64, Array{NFAState}}()
-
-    for ( i, state ) ∈ enumerate(keys(nfa.states))
-        write(states, draw(state, i))
-        index[state] = i
-    end
-
-    for ( i, state ) ∈ enumerate(keys(nfa.states))
-        for on ∈ keys(nfa.states[state])
-            for target ∈ nfa.states[state][on]
-                if target ∉ keys(index)
-                    k = length(index) + 1
-                    index[target] = k
-
-                    write(states, draw(target, k))
-                end
-
-                k = index[target]
-
-                write(connections, "   state$i -> state$k [")
-                write(connections, draw(on))
-                write(connections, " ];\n")
-            end
-        end
-    end
-
-    # Grouping up nodes on error values can make for a cleaner graph. It should be possible to do this in a more concise
-    # fashion, but for now I think this is easier to read.
-    #
-    for state ∈ keys(index)
-        if state.errors ∉ keys(errors)
-            errors[state.errors] = [ ]
-        end
-        push!(errors[state.errors], state)
-    end
-
-    for error ∈ keys(errors)
-        write(ranks, "   { rank = same;")
-        for state ∈ errors[error]
-            write(ranks, " state$(index[state]);")
-        end
-        write(ranks, "}\n")
-    end
-
-    write(io, "digraph g {\n")
-    write(io, read(connections, String))
-    write(io, read(states, String))
-    write(io, read(ranks, String))
-    write(io, "}")
-
-    return nothing
-end
-
 
 function dfa(nfa::NFA)
     function ε_closure(initial_states::Set{NFAState})
@@ -139,8 +63,26 @@ function dfa(nfa::NFA)
         return Set(states)
     end
 
-    function intern(state::DFAState)
-        return (state ∈ keys(dfa.states)) ? dfa.states[state][2] : state
+    function intern(state::DFAState, states::Dict{DFAState, Tuple{Bool, Dict{Union{Char, AnythingBut}, DFAState}}})
+        return (state ∈ keys(states)) ? states[state][2] : state
+    end
+
+    function merge!(targets::Dict{Union{Char, AnythingBut}, DFAState})
+        for anything_but ∈ keys(targets)
+            if typeof(anything_but) == AnythingBut
+                for on ∈ filter(on -> on != anything_but, keys(targets))
+                    if targets[on].states == targets[anything_but].states
+                        delete!(targets, on)
+                        if on ∈ anything_but.excluded && 
+                            delete!(anything_but.excluded, on)
+                        end
+                    end
+                end
+                break
+            end
+        end
+
+        return nothing # Just being explicit.
     end
 
     function move(state::NFAState, letter::Char)
@@ -201,51 +143,44 @@ function dfa(nfa::NFA)
 
     letters = unique(nfa.word)
 
-    dfa = DFA(nfa, DFAState(ε_closure(Set([ nfa.start ]))),
-              Dict{DFAState, Tuple{Bool, Dict{Union{Char, AnythingBut}, DFAState}}}(), Set{DFAState}())
+    dfa = DFA(nfa, DFAState(ε_closure(Set([ nfa.start ]))), 
+              Dict{DFAState, Dict{Union{Char, AnythingBut}, DFAState}}(), Set{DFAState}())
 
-    dfa.states[dfa.start] = ( false, Dict{Union{Char, AnythingBut}, DFAState}() )
+    dfa_states = Dict{DFAState, Tuple{Bool, Dict{Union{Char, AnythingBut}, DFAState}}}()
+    dfa_states[dfa.start] = ( false, Dict{Union{Char, AnythingBut}, DFAState}() )
 
     while true
-        dfa_state = findfirst(t -> !t[1], dfa.states)
-        targets   = Dict{Union{Char, AnythingBut}, DFAState}()
-        others    = AnythingBut(Set{Char}(letters))
+        targets = Dict{Union{Char, AnythingBut}, DFAState}()
+        others  = AnythingBut(Set{Char}(letters))
+
+        dfa_state = findfirst(t -> !t[1], dfa_states)
 
         if dfa_state == nothing
             break
         end
 
         for letter ∈ letters
-            targets[letter] = intern(transition(dfa_state, letter))
+            targets[letter] = intern(transition(dfa_state, letter), dfa_states)
         end
         
-        targets[others] = intern(transition(dfa_state, others))
+        targets[others] = intern(transition(dfa_state, others), dfa_states)
 
-        for anything_but ∈ keys(targets)
-            if typeof(anything_but) == AnythingBut
-                for on ∈ filter(on -> on != anything_but, keys(targets))
-                    if targets[on].states == targets[anything_but].states
-                        delete!(targets, on)
-                        if on ∈ anything_but.excluded && 
-                            delete!(anything_but.excluded, on)
-                        end
-                    end
-                end
-                break
-            end
-        end
+        merge!(targets)
 
-        dfa.states[dfa_state] = ( true, targets )
+        dfa_states[dfa_state] = ( true, targets )
         for target ∈ targets
-            if findfirst(k -> k.states == target[2].states, collect(keys(dfa.states))) == nothing
-                dfa.states[target[2]] = ( false, Dict{Union{Char, AnythingBut}, DFAState}() )
+            if findfirst(k -> k.states == target[2].states, collect(keys(dfa_states))) == nothing
+                dfa_states[target[2]] = ( false, Dict{Union{Char, AnythingBut}, DFAState}() )
             end
         end
     end
 
-    for dfa_state ∈ keys(dfa.states)
-        if !isempty(intersect(dfa_state.states, nfa.finals))
-            push!(dfa.finals, dfa_state)
+    union!(dfa.finals, Set(filter(dfa_state -> !isempty(intersect(dfa_state.states, nfa.finals)), collect(keys(dfa_states)))))
+
+    for dfa_state ∈ keys(dfa_states)
+        dfa.states[dfa_state] = Dict{Union{Char, AnythingBut}, DFAState}()
+        for on ∈ keys(dfa_states[dfa_state][2])
+            dfa.states[dfa_state][on] = dfa_states[dfa_state][2][on]
         end
     end
 
@@ -299,4 +234,181 @@ function nfa(word, maximum_error)
 
     return nfa
 end
+
+
+function draw(state::DFAState, finals::Set{DFAState}, id::Int64)
+    drawn = IOBuffer(append = true)
+
+    write(drawn, "   state$(id) [ label=")
+
+    if isempty(state.states)
+        write(drawn, "\"∅\"")
+
+    else
+        write(drawn, "<")
+        for nfa_state ∈ sort(collect(state.states), lt = isless)
+            write(drawn, "$(nfa_state.seen)<font point-size=\"11\"><sup>$(nfa_state.errors)</sup></font>")
+        end
+        write(drawn, ">")
+    end
+
+    if state ∈ finals
+        write(drawn, " penwidth = 3")
+    end
+
+    write(drawn, " ];\n")
+
+    return String(take!(drawn))
+end
+
+
+function draw(state::NFAState, finals::Set{NFAState}, id::Int64)
+    return ("   state$(id) [ label=\"($(state.seen), $(state.errors))\""
+            * (state ∈ finals ? " penwidth = 3" : "")
+            * " ];\n")
+end
+
+
+function draw(on::Char)
+    return " label=<<I>$(on)</I>>"
+end
+
+
+function draw(on::Anything)
+    return " label=<*>"
+end
+
+
+function draw(on::AnythingBut)
+    if isempty(on.excluded)
+        return " label=<*>"
+
+    else
+        drawn = IOBuffer(append = true)
+
+        write(drawn, " label=< [⌃<I>")
+        write(drawn, join(sort(collect(on.excluded))))
+        write(drawn, "</I>] >")
+
+        return String(take!(drawn))
+    end
+end
+
+
+function draw(on::Epsilon)
+    return " label=<&#949;>"
+end
+
+
+function draw(io::IO, nfa::NFA)
+    states      = IOBuffer(append = true)
+    connections = IOBuffer(append = true)
+    ranks       = IOBuffer(append = true)
+
+    index  = Dict{NFAState, Int64}()
+    errors = Dict{Int64, Array{NFAState}}()
+
+    for ( i, state ) ∈ enumerate(keys(nfa.states))
+        write(states, draw(state, nfa.finals, i))
+        index[state] = i
+    end
+
+    for ( i, state ) ∈ enumerate(keys(nfa.states))
+        for on ∈ keys(nfa.states[state])
+            for target ∈ nfa.states[state][on]
+                if target ∉ keys(index)
+                    k = length(index) + 1
+                    index[target] = k
+
+                    write(states, draw(target, nfa.finals, k))
+                end
+
+                k = index[target]
+
+                write(connections, "   state$i -> state$k [")
+                write(connections, draw(on))
+                write(connections, " ];\n")
+            end
+        end
+    end
+
+    # Grouping up nodes on error values can make for a cleaner graph. It should be possible to do this in a more concise
+    # fashion, but for now I think this is easier to read.
+    #
+    for state ∈ keys(index)
+        if state.errors ∉ keys(errors)
+            errors[state.errors] = [ ]
+        end
+        push!(errors[state.errors], state)
+    end
+
+    for error ∈ keys(errors)
+        write(ranks, "   { rank = same;")
+        for state ∈ errors[error]
+            write(ranks, " state$(index[state]);")
+        end
+        write(ranks, "}\n")
+    end
+
+    write(io, "digraph g {\n")
+    write(io, read(connections, String))
+    write(io, read(states, String))
+    write(io, read(ranks, String))
+    write(io, "}")
+
+    return nothing # Just being explicit.
+end
+
+
+function draw(io::IO, dfa::DFA)
+    states      = IOBuffer(append = true)
+    connections = IOBuffer(append = true)
+
+    index = Dict{DFAState, Int64}()
+
+    for ( i, state ) ∈ enumerate(keys(dfa.states))
+        if !isempty(state.states)
+            write(states, draw(state, dfa.finals, i))
+        end
+        index[state] = i
+    end
+
+    for ( i, state ) ∈ enumerate(keys(dfa.states))
+        if state ∉ keys(index)
+            k = length(index) + 1
+            index[state] = k
+        end
+
+        for on ∈ keys(dfa.states[state])
+            target = dfa.states[state][on]
+
+            if !isempty(target.states)
+                k = findfirst(t -> t.states == target.states, collect(keys(index)))
+                if k == nothing
+                    k = length(index) + 1
+                    index[target] = k
+
+                    write(states, draw(target, dfa.finals, k))
+                end
+
+                write(connections, "   state$i -> state$k [")
+                write(connections, draw(on))
+                write(connections, " ];\n")
+            end
+        end
+    end
+
+    write(io, "digraph g {\n")
+    write(io, read(connections, String))
+    write(io, read(states, String))
+    write(io, "}")
+
+    return nothing # Just being explicit.
+end
+
+
+function isless(left::NFAState, right::NFAState)
+    return isless(left.seen, right.seen) || (isequal(left.seen, right.seen) && isless(left.errors, right.errors))
+end
+
 
