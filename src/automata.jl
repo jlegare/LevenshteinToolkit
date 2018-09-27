@@ -1,6 +1,7 @@
 using DataStructures
 
 import Base.isless
+import Base.==
 
 # ----------------------------------------
 # TYPES
@@ -43,6 +44,63 @@ end
 # FUNCTIONS
 # ----------------------------------------
 
+function ==(left::DFAState, right::DFAState)
+    return left.states == right.states
+end
+
+
+function ==(left::NFAState, right::NFAState)
+    return left.seen == right.seen && left.errors == right.errors
+end
+
+
+function check(dfa::DFA, word::String)
+    function find(state::DFAState, states::Dict{DFAState, Dict{Union{Char, AnythingBut}, DFAState}})
+        for s ∈ states
+            if s[1] == state
+                return s[2]
+            end
+        end
+
+        return nothing
+    end
+
+    function contains(state::DFAState, states::Set{DFAState})
+        for s ∈ states
+            if s == state
+                return true
+            end
+        end
+
+        return false
+    end
+
+
+    state = dfa.start
+
+    for character in word
+        if character ∈ keys(find(state, dfa.states))
+            state = find(state, dfa.states)[character]
+
+        else
+            transitions = collect(keys(find(state, dfa.states)))
+            index = findfirst(s -> typeof(s) == AnythingBut, transitions)
+            if index != 0
+                anything_but = transitions[index]
+                state = find(state, dfa.states)[anything_but]
+
+            else
+                # This is impossible ... every character should be covered by exactly one transition in a DFA.
+                #
+                @assert false
+            end
+        end
+    end
+
+    return contains(state, dfa.finals)
+end
+
+
 function dfa(nfa::NFA)
     function ε_closure(initial_states::Set{NFAState})
         states = deepcopy(initial_states)
@@ -61,10 +119,6 @@ function dfa(nfa::NFA)
         end
 
         return Set(states)
-    end
-
-    function intern(state::DFAState, states::Dict{DFAState, Tuple{Bool, Dict{Union{Char, AnythingBut}, DFAState}}})
-        return (state ∈ keys(states)) ? states[state][2] : state
     end
 
     function merge!(targets::Dict{Union{Char, AnythingBut}, DFAState})
@@ -160,16 +214,16 @@ function dfa(nfa::NFA)
         end
 
         for letter ∈ letters
-            targets[letter] = intern(transition(dfa_state, letter), dfa_states)
+            targets[letter] = transition(dfa_state, letter)
         end
         
-        targets[others] = intern(transition(dfa_state, others), dfa_states)
+        targets[others] = transition(dfa_state, others)
 
         merge!(targets)
 
         dfa_states[dfa_state] = ( true, targets )
         for target ∈ targets
-            if findfirst(k -> k.states == target[2].states, collect(keys(dfa_states))) == nothing
+            if findfirst(k -> k == target[2], collect(keys(dfa_states))) == nothing
                 dfa_states[target[2]] = ( false, Dict{Union{Char, AnythingBut}, DFAState}() )
             end
         end

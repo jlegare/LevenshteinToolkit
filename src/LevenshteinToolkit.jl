@@ -10,6 +10,7 @@ export distance_row
 export dfa
 export nfa
 
+export check
 export draw
 
 include("matrix.jl")
