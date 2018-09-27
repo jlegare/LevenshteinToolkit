@@ -28,7 +28,14 @@ The ``draw`` function can be used to generate a [GraphViz](https://www.graphviz.
 ```julia
 open(f -> draw(f, nfa_automaton), "nfa.dot", "w")
 ```
-The resulting file can be rendered using the ``dot`` command-line tool.
+The resulting file can be rendered using the ``dot`` command-line tool:
+```bash
+dot -Tsvg nfa.dot -o nfa.svg
+```
 
-The ``dfa`` function builds a [deterministic finite automaton](https://en.wikipedia.org/wiki/Deterministic_finite_automaton) (DFA) from an NFA. As for the case of NFAs, the ``draw`` function can be used to generate a GraphViz input file. 
+The ``dfa`` function builds a [deterministic finite automaton](https://en.wikipedia.org/wiki/Deterministic_finite_automaton) (DFA) from an NFA. 
+```julia
+dfa_automaton = dfa(nfa_automaton)
+```
+As for the case of NFAs, the ``draw`` function can be used to generate a GraphViz input file. 
 
