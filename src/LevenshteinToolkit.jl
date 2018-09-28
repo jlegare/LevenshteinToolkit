@@ -8,7 +8,6 @@ export distance_matrix
 export distance_row
 
 export dfa
-export dfa2
 export nfa
 
 export check
