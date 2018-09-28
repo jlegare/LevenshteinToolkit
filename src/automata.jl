@@ -40,6 +40,19 @@ struct DFA
     finals ::Set{DFAState}
 end
 
+struct DFAState2
+    index       ::Int64
+    nfa_states  ::Set{NFAState}
+    transitions ::Array{Tuple{Union{Char, AnythingBut}, Int64}}
+end
+
+struct DFA2
+    nfa    ::NFA
+    start  ::DFAState2
+    states ::Array{DFAState2}
+    finals ::Set{DFAState2}
+end
+
 # ----------------------------------------
 # FUNCTIONS
 # ----------------------------------------
@@ -51,6 +64,49 @@ end
 
 function ==(left::NFAState, right::NFAState)
     return left.seen == right.seen && left.errors == right.errors
+end
+
+
+function isless(left::NFAState, right::NFAState)
+    return isless(left.seen, right.seen) || (isequal(left.seen, right.seen) && isless(left.errors, right.errors))
+end
+
+
+function DFAState2(nfa_states::Set{NFAState})
+    return DFAState2(-1, nfa_states, [ ])
+end
+
+
+function DFAState2(index::Int64, nfa_states::Set{NFAState})
+    return DFAState2(index, nfa_states, [ ])
+end
+
+
+function DFAState2(dfa_state::DFAState2, transitions::Array{Tuple{Union{Char, AnythingBut}, Int64}})
+    return DFAState2(dfa_state.index, dfa_state.nfa_states, transitions)
+end
+
+
+function check(dfa::DFA2, word::String)
+    function accepts(transition::Tuple{Char, Int64}, character::Char)
+        return transition[1] == character
+    end
+
+    function accepts(transition::Tuple{AnythingBut, Int64}, character::Char)
+        return character ∉transition[1].excluded
+    end
+
+    state = dfa.start
+
+    for character ∈ word
+        for transition ∈ state.transitions
+            if accepts(transition, character)
+                state = dfa.states[transition[2]]
+            end
+        end
+    end
+
+    return state ∈ dfa.finals
 end
 
 
@@ -98,6 +154,156 @@ function check(dfa::DFA, word::String)
     end
 
     return contains(state, dfa.finals)
+end
+
+
+function dfa2(nfa::NFA)
+    function ε_closure(initial_states::Set{NFAState})
+        nfa_states = deepcopy(initial_states)
+
+        while true
+            i = length(nfa_states)
+            for nfa_state ∈ nfa_states
+                if Epsilon() ∈ keys(nfa.states[nfa_state])
+                    union!(nfa_states, nfa.states[nfa_state][Epsilon()])
+                end
+            end
+
+            if length(nfa_states) == i
+                break
+            end
+        end
+
+        return Set(nfa_states)
+    end
+
+    function intern!(original::DFAState2, work_items::Array{Tuple{Bool, DFAState2}, 1})::Int64
+        index = findfirst(t -> t[2].nfa_states == original.nfa_states, work_items)
+
+        if index == nothing
+            interned = DFAState2(length(work_items) + 1, original.nfa_states)
+
+            push!(work_items, ( false, interned ))
+
+            return interned.index
+
+        else
+            return index
+        end
+    end
+
+    function merge(original_transitions::Array{Tuple{Union{Char, AnythingBut}, Int64}})
+        anything_but_transitions = filter(t -> typeof(t[1]) == AnythingBut, original_transitions)
+        updated_transitions      = Array{Tuple{Union{Char, AnythingBut}, Int64}, 1}()
+
+        if length(anything_but_transitions) != 0
+            anything_but        = anything_but_transitions[1][1]
+            anything_but_target = anything_but_transitions[1][2]
+
+            for ( index, ( character, target ) ) ∈ enumerate(original_transitions)
+                if character != anything_but && target == anything_but_target
+                    delete!(anything_but.excluded, character)
+
+                else
+                    push!(updated_transitions, ( character, target ))
+                end
+            end
+        end                        
+
+        return updated_transitions
+    end
+
+    function move(state::NFAState, letter::Char)
+        states = Set{NFAState}()
+
+        if letter ∈ keys(nfa.states[state])
+            union!(states, nfa.states[state][letter])
+        end
+
+        if Anything() ∈ keys(nfa.states[state])
+            union!(states, nfa.states[state][Anything()])
+        end
+
+        return ε_closure(states)
+    end
+
+    function move(state::NFAState, others::AnythingBut)
+        states = Set{NFAState}()
+
+        if Anything() ∈ keys(nfa.states[state])
+            union!(states, ε_closure(nfa.states[state][Anything()]))
+        end
+
+        # If STATE has a transition on a character that is not in AnythingBut, we need to include it here.
+        #
+        for letter ∈ setdiff(keys(nfa.states[state]), others.excluded)
+            if letter == Anything() || letter == Epsilon()
+                # EMPTY ... ignore these ones.
+
+            else
+                union!(states, ε_closure(nfa.states[state][letter]))
+            end
+        end
+
+        return states
+    end
+
+    function transition(dfa_state::DFAState2, character::Char)
+        set = Set{NFAState}()
+
+        for nfa_state ∈ dfa_state.nfa_states
+            union!(set, move(nfa_state, character))
+        end
+
+        return DFAState2(set)
+    end
+
+    function transition(dfa_state::DFAState2, others::AnythingBut)
+        set = Set{NFAState}()
+
+        for nfa_state ∈ dfa_state.nfa_states
+            union!(set, move(nfa_state, others))
+        end
+
+        return DFAState2(set)
+    end
+
+    characters = unique(nfa.word) # There isn't really any point in sorting them ... all it would accomplish is make the
+                                  # output prettier.
+
+    work_items = Array{Tuple{Bool, DFAState2}, 1}()
+
+    # Prime the process with the START state. Notice that the index of the START state is necessarily 1 because of this.
+    #
+    push!(work_items, ( false, DFAState2(length(work_items) + 1, ε_closure(Set([ nfa.start ]))) ))
+
+    index = 1
+    while true
+        index = findnext(t -> !t[1], work_items, index)
+
+        if index == nothing
+            break
+
+        else
+            transitions = Array{Tuple{Union{Char, AnythingBut}, Int64}, 1}()
+            others  = AnythingBut(Set{Char}(characters))
+
+            dfa_state = work_items[index][2]
+
+            for character ∈ characters
+                push!(transitions, ( character, intern!(transition(dfa_state, character), work_items) ))
+            end
+            push!(transitions, ( others, intern!(transition(dfa_state, others), work_items) ))
+
+            dfa_state = DFAState2(dfa_state, merge(transitions))
+            work_items[index] = ( true, dfa_state )
+        end
+    end
+
+    dfa_states = collect(map(t -> t[2], work_items))
+    dfa_finals = Set(filter(dfa_state -> !isempty(intersect(dfa_state.nfa_states, nfa.finals)), dfa_states))
+
+    return DFA2(nfa, dfa_states[1], dfa_states, dfa_finals)
 end
 
 
@@ -197,8 +403,8 @@ function dfa(nfa::NFA)
 
     letters = unique(nfa.word)
 
-    dfa = DFA(nfa, DFAState(ε_closure(Set([ nfa.start ]))), 
-              Dict{DFAState, Dict{Union{Char, AnythingBut}, DFAState}}(), Set{DFAState}())
+    automaton = DFA(nfa, DFAState(ε_closure(Set([ nfa.start ]))), 
+                    Dict{DFAState, Dict{Union{Char, AnythingBut}, DFAState}}(), Set{DFAState}())
 
     dfa_states = Dict{DFAState, Tuple{Bool, Dict{Union{Char, AnythingBut}, DFAState}}}()
     dfa_states[dfa.start] = ( false, Dict{Union{Char, AnythingBut}, DFAState}() )
@@ -229,20 +435,20 @@ function dfa(nfa::NFA)
         end
     end
 
-    union!(dfa.finals, Set(filter(dfa_state -> !isempty(intersect(dfa_state.states, nfa.finals)), collect(keys(dfa_states)))))
+    union!(automaton.finals, Set(filter(dfa_state -> !isempty(intersect(dfa_state.states, nfa.finals)), collect(keys(dfa_states)))))
 
     for dfa_state ∈ keys(dfa_states)
-        dfa.states[dfa_state] = Dict{Union{Char, AnythingBut}, DFAState}()
+        automaton.states[dfa_state] = Dict{Union{Char, AnythingBut}, DFAState}()
         for on ∈ keys(dfa_states[dfa_state][2])
-            dfa.states[dfa_state][on] = dfa_states[dfa_state][2][on]
+            automaton.states[dfa_state][on] = dfa_states[dfa_state][2][on]
         end
     end
 
-    return dfa
+    return automaton
 end
 
 
-function nfa(word, maximum_error)
+function nfa(word, maximum_error::Int64)
     function accept(nfa, state)
         push!(nfa.finals, state)
     end
@@ -263,30 +469,30 @@ function nfa(word, maximum_error)
         push!(nfa.states[from][on], to)
     end
 
-    nfa = NFA(word, NFAState(0, 0), OrderedDict{NFAState, OrderedDict{Union{Epsilon, Anything, Char}, Set{NFAState}}}(),
-              Set{NFAState}())
+    automaton = NFA(word, NFAState(0, 0), OrderedDict{NFAState, OrderedDict{Union{Epsilon, Anything, Char}, Set{NFAState}}}(),
+                    Set{NFAState}())
 
     for ( i, character ) ∈ zip(Iterators.countfrom(0), word)
         for error ∈ 0:maximum_error
-            add(nfa, NFAState(i, error), character, NFAState(i + 1, error)) # Correct character.
+            add(automaton, NFAState(i, error), character, NFAState(i + 1, error)) # Correct character.
 
             if error < maximum_error
-                add(nfa, NFAState(i, error), Anything(), NFAState(i, error + 1))     # Delete a character.
-                add(nfa, NFAState(i, error), Epsilon(), NFAState(i + 1, error + 1))  # Insert a character.
-                add(nfa, NFAState(i, error), Anything(), NFAState(i + 1, error + 1)) # Substitute a character.
+                add(automaton, NFAState(i, error), Anything(), NFAState(i, error + 1))     # Delete a character.
+                add(automaton, NFAState(i, error), Epsilon(), NFAState(i + 1, error + 1))  # Insert a character.
+                add(automaton, NFAState(i, error), Anything(), NFAState(i + 1, error + 1)) # Substitute a character.
             end
         end
     end
 
     for error ∈ 0:maximum_error
         if error < maximum_error
-            add(nfa, NFAState(length(word), error), Anything(), NFAState(length(word), error + 1))
+            add(automaton, NFAState(length(word), error), Anything(), NFAState(length(word), error + 1))
         end
 
-        accept(nfa, NFAState(length(word), error))
+        accept(automaton, NFAState(length(word), error))
     end
 
-    return nfa
+    return automaton
 end
 
 
@@ -307,6 +513,32 @@ function draw(state::DFAState, finals::Set{DFAState}, id::Int64)
     end
 
     if state ∈ finals
+        write(drawn, " penwidth = 3")
+    end
+
+    write(drawn, " ];\n")
+
+    return String(take!(drawn))
+end
+
+
+function draw(dfa_state::DFAState2, dfa_finals::Set{DFAState2})
+    drawn = IOBuffer(append = true)
+
+    write(drawn, "   state$(dfa_state.index) [ label=")
+
+    if isempty(dfa_state.nfa_states)
+        write(drawn, "\"∅\"")
+
+    else
+        write(drawn, "<")
+        for nfa_state ∈ sort(collect(dfa_state.nfa_states), lt = isless)
+            write(drawn, "$(nfa_state.seen)<font point-size=\"11\"><sup>$(nfa_state.errors)</sup></font>")
+        end
+        write(drawn, ">")
+    end
+
+    if dfa_state ∈ dfa_finals
         write(drawn, " penwidth = 3")
     end
 
@@ -461,8 +693,30 @@ function draw(io::IO, dfa::DFA)
 end
 
 
-function isless(left::NFAState, right::NFAState)
-    return isless(left.seen, right.seen) || (isequal(left.seen, right.seen) && isless(left.errors, right.errors))
+function draw(io::IO, dfa::DFA2)
+    states      = IOBuffer(append = true)
+    connections = IOBuffer(append = true)
+
+    for ( source, dfa_state ) ∈ enumerate(dfa.states)
+        if !isempty(dfa.states[source].nfa_states)
+            write(states, draw(dfa.states[source], dfa.finals))
+        end
+
+        for ( character, target ) ∈ dfa_state.transitions
+            if !isempty(dfa.states[target].nfa_states)
+                write(connections, "   state$(source) -> state$(target) [")
+                write(connections, draw(character))
+                write(connections, " ];\n")
+            end
+        end
+    end
+
+    write(io, "digraph g {\n")
+    write(io, read(connections, String))
+    write(io, read(states, String))
+    write(io, "}")
+
+    return nothing # Just being explicit.
 end
 
 
