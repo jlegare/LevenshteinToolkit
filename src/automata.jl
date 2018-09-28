@@ -77,7 +77,7 @@ function check(dfa::DFA, word::String)
     end
 
     function accepts(transition::Tuple{AnythingBut, Int64}, character::Char)
-        return character ∉transition[1].excluded
+        return character ∉ transition[1].excluded
     end
 
     state = dfa.start
